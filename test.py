@@ -153,7 +153,7 @@ class ObjectAnalytics:
 # Initialize models with caching
 @st.cache_resource
 def load_models():
-    model = YOLO('yolov5n.pt')  # Ensure 'yolov5n.pt' is the correct model path
+    model = YOLO('yolov10n.pt')  # Ensure 'yolov5n.pt' is the correct model path
     tracker = DeepSort(
         max_age=30,
         n_init=3,
@@ -301,7 +301,7 @@ def create_average_confidence_visualization(analytics):
 def create_visualizations(analytics, performance_metrics, frame_number):
     st.header("📊 Detailed Analysis")
     
-    # Object Detection Statistics
+    
     metrics = analytics.get_metrics()
     
     col1, col2, col3 = st.columns(3)
@@ -313,7 +313,7 @@ def create_visualizations(analytics, performance_metrics, frame_number):
         st.metric("Average Inference Time (ms)", 
                  f"{np.mean(performance_metrics['inference_time'])*1000:.2f}")
     
-    # Object Class Distribution
+    
     st.subheader("Object Class Distribution")
     class_dist = pd.DataFrame(list(metrics['objects_per_class'].items()),
                             columns=['Class', 'Count'])
@@ -323,7 +323,7 @@ def create_visualizations(analytics, performance_metrics, frame_number):
                  color_discrete_sequence=px.colors.qualitative.Vivid)
     st.plotly_chart(fig)
     
-    # Confidence Score Distribution
+    
     st.subheader("Confidence Score Distribution")
     conf_data = []
     for cls, scores in analytics.object_confidence_scores.items():
@@ -335,11 +335,11 @@ def create_visualizations(analytics, performance_metrics, frame_number):
                  color_discrete_sequence=px.colors.qualitative.Vivid)
     st.plotly_chart(fig)
     
-    # Average Confidence per Class
+    
     st.subheader("Average Confidence per Class")
     create_average_confidence_visualization(analytics)
     
-    # Object Tracking Analysis
+    
     st.subheader("Object Tracking Analysis")
     track_data = []
     for track_id, history in analytics.tracking_history.items():
@@ -350,7 +350,7 @@ def create_visualizations(analytics, performance_metrics, frame_number):
             'Class': history[0]['class']
         })
     
-    if track_data:  # Only create visualization if we have tracking data
+    if track_data:  
         track_df = pd.DataFrame(track_data)
         fig = px.scatter(track_df, x='Frames Tracked', y='Average Confidence',
                         color='Class', title="Object Tracking Performance",
@@ -360,7 +360,7 @@ def create_visualizations(analytics, performance_metrics, frame_number):
         st.warning("No tracking data available for visualization")
         track_df = pd.DataFrame()
     
-    # Performance Metrics Over Time
+    
     st.subheader("Performance Metrics Over Time")
     perf_df = pd.DataFrame({
         'Frame': range(1, frame_number + 1),
@@ -375,10 +375,10 @@ def create_visualizations(analytics, performance_metrics, frame_number):
     return track_df, perf_df
 
 def main():
-    st.title("🎥 Advanced Object Detection and Analysis System")
+    st.title("🎥 Advanced Object Detection - Aryan Rajpurkar ( D019 - 60009220144 )")
     st.write("""
     Enhanced real-time object detection and tracking system with detailed analytics.
-    Features include object persistence tracking, velocity estimation, and comprehensive performance metrics.
+    IPCV Mini Project
     """)
     
     st.sidebar.header("🛠️ Configuration")
@@ -396,7 +396,7 @@ def main():
             st.sidebar.warning("Please upload a video file.")
             return
     else:
-        video_path = 0  # Webcam
+        video_path = 0  
     
     if st.sidebar.button("Start Analysis"):
         with st.spinner("Processing video..."):
@@ -408,10 +408,10 @@ def main():
                 analytics, performance_metrics, frame_number
             )
             
-            # Export options
+            
             st.subheader("📤 Export Analysis")
             
-            # Tracking data export
+            
             if not track_df.empty:
                 csv_track = track_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
@@ -421,7 +421,7 @@ def main():
                     mime='text/csv',
                 )
             
-            # Performance data export
+            
             csv_perf = perf_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="Download Performance Data (CSV)",
@@ -430,7 +430,7 @@ def main():
                 mime='text/csv',
             )
         
-        # Cleanup
+        
         if source_option == "Video File" and video_file is not None:
             os.unlink(video_path)
 
