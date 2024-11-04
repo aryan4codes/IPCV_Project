@@ -65,6 +65,7 @@ class PerformanceMonitor:
         self.fig.data[0].y = list(self.fps_data)
         self.fig.data[1].x = list(self.time_points)
         self.fig.data[1].y = list(self.objects_data)
+
 class ObjectAnalytics:
     def __init__(self):
         self.unique_objects = defaultdict(int)
@@ -164,7 +165,7 @@ def load_models():
     )
     return model, tracker
 
-def process_video(video_path, source_option, confidence_threshold=0.5):
+def process_video(video_path, source_option):
     model, tracker = load_models()
     cap = cv2.VideoCapture(video_path)
     
@@ -185,7 +186,7 @@ def process_video(video_path, source_option, confidence_threshold=0.5):
     monitor = PerformanceMonitor()
     
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if source_option == "Video File" else None
-    
+    track_confidences = {}
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -206,68 +207,60 @@ def process_video(video_path, source_option, confidence_threshold=0.5):
             boxes = results[0].boxes
             for box in boxes:
                 conf = float(box.conf[0])
-                if conf < confidence_threshold:
-                    continue
-                    
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 class_id = int(box.cls[0])
                 class_name = model.names[class_id]
                 
-                # Calculate width and height for DeepSort
                 w = x2 - x1
                 h = y2 - y1
                 
-                # Format detection for DeepSort: ([x1, y1, w, h], confidence, class_name)
+                # Store both detection and confidence
                 detection = ([x1, y1, w, h], conf, class_name)
                 detections.append(detection)
+                confidence_scores.append(conf)
                 class_names.append(class_name)
         
         # Update tracking
         if detections:
-            # Update tracks with the detections and provide the current frame
             tracks = tracker.update_tracks(detections, frame=frame)
             
-            # Update analytics with valid tracks
             valid_tracks = []
             valid_classes = []
             valid_confidences = []
             
-            for track in tracks:
+            for track, conf, class_name in zip(tracks, confidence_scores, class_names):
                 if not track.is_confirmed():
                     continue
-                valid_tracks.append(track)
-                # Extract class name and confidence from tracking_history
-                # Assuming methods get_det_class() and get_det_confidence() exist
-                # If not, access attributes directly
-                try:
-                    class_name = track.get_det_class()
-                    confidence = track.get_det_confidence()
-                except AttributeError:
-                    # Access attributes directly if methods don't exist
-                    class_name = track.det_class if hasattr(track, 'det_class') else "Unknown"
-                    confidence = track.det_confidence if hasattr(track, 'det_confidence') else 0.0
+                    
+                # Store the confidence score for this track
+                track_confidences[track.track_id] = conf
                 
+                valid_tracks.append(track)
                 valid_classes.append(class_name)
-                valid_confidences.append(confidence)
+                valid_confidences.append(conf)
             
             if valid_tracks:
                 analytics.update(frame_number, valid_tracks, valid_classes, valid_confidences)
             
             # Draw tracks and labels
-            for track, class_name in zip(valid_tracks, valid_classes):
+            for track in valid_tracks:
                 bbox = track.to_tlbr()
+                
+                # Get the stored confidence for this track
+                conf = track_confidences.get(track.track_id, 0.0)
+                class_name = next((c for t, c in zip(tracks, class_names) if t.track_id == track.track_id), "Unknown")
                 
                 # Draw bounding box
                 cv2.rectangle(frame, 
-                              (int(bbox[0]), int(bbox[1])), 
-                              (int(bbox[2]), int(bbox[3])), 
-                              (0, 255, 0), 2)
+                            (int(bbox[0]), int(bbox[1])), 
+                            (int(bbox[2]), int(bbox[3])), 
+                            (0, 255, 0), 2)
                 
-                # Draw label with track ID
-                label = f"{class_name}-{track.track_id}"
+                # Draw label with track ID and confidence
+                label = f"{class_name}-{track.track_id} ({conf:.2f})"
                 cv2.putText(frame, label, 
-                            (int(bbox[0]), int(bbox[1] - 10)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                          (int(bbox[0]), int(bbox[1] - 10)),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         
         # Update performance metrics
         inference_time = time.time() - start_time
@@ -291,6 +284,20 @@ def process_video(video_path, source_option, confidence_threshold=0.5):
     cap.release()
     return analytics, performance_metrics, frame_number
 
+def create_average_confidence_visualization(analytics):
+    metrics = analytics.get_metrics()
+    avg_confidence = metrics['avg_confidence_per_class']
+    
+    conf_df = pd.DataFrame(list(avg_confidence.items()), columns=['Class', 'Average Confidence'])
+    
+    fig = px.bar(conf_df, x='Class', y='Average Confidence',
+                 title="Average Confidence per Class",
+                 labels={'Average Confidence': 'Average Confidence Score'},
+                 color='Class',
+                 color_discrete_sequence=px.colors.qualitative.Pastel)
+    
+    st.plotly_chart(fig, use_container_width=True)
+
 def create_visualizations(analytics, performance_metrics, frame_number):
     st.header("📊 Detailed Analysis")
     
@@ -311,7 +318,9 @@ def create_visualizations(analytics, performance_metrics, frame_number):
     class_dist = pd.DataFrame(list(metrics['objects_per_class'].items()),
                             columns=['Class', 'Count'])
     fig = px.bar(class_dist, x='Class', y='Count',
-                 title="Objects Detected by Class")
+                 title="Objects Detected by Class",
+                 color='Class',
+                 color_discrete_sequence=px.colors.qualitative.Vivid)
     st.plotly_chart(fig)
     
     # Confidence Score Distribution
@@ -321,8 +330,14 @@ def create_visualizations(analytics, performance_metrics, frame_number):
         conf_data.extend([(cls, score) for score in scores])
     conf_df = pd.DataFrame(conf_data, columns=['Class', 'Confidence'])
     fig = px.box(conf_df, x='Class', y='Confidence',
-                 title="Confidence Score Distribution by Class")
+                 title="Confidence Score Distribution by Class",
+                 color='Class',
+                 color_discrete_sequence=px.colors.qualitative.Vivid)
     st.plotly_chart(fig)
+    
+    # Average Confidence per Class
+    st.subheader("Average Confidence per Class")
+    create_average_confidence_visualization(analytics)
     
     # Object Tracking Analysis
     st.subheader("Object Tracking Analysis")
@@ -338,7 +353,8 @@ def create_visualizations(analytics, performance_metrics, frame_number):
     if track_data:  # Only create visualization if we have tracking data
         track_df = pd.DataFrame(track_data)
         fig = px.scatter(track_df, x='Frames Tracked', y='Average Confidence',
-                        color='Class', title="Object Tracking Performance")
+                        color='Class', title="Object Tracking Performance",
+                        color_discrete_sequence=px.colors.qualitative.Vivid)
         st.plotly_chart(fig)
     else:
         st.warning("No tracking data available for visualization")
@@ -352,7 +368,8 @@ def create_visualizations(analytics, performance_metrics, frame_number):
         'Inference Time (ms)': np.array(performance_metrics['inference_time']) * 1000
     })
     fig = px.line(perf_df, x='Frame', y=['FPS', 'Inference Time (ms)'],
-                  title="Performance Metrics Over Time")
+                  title="Performance Metrics Over Time",
+                  labels={'value': 'Metric Value', 'variable': 'Metric'})
     st.plotly_chart(fig)
     
     return track_df, perf_df
@@ -367,8 +384,6 @@ def main():
     st.sidebar.header("🛠️ Configuration")
     source_option = st.sidebar.selectbox("Select Video Source", 
                                        ("Video File", "Webcam"))
-    confidence_threshold = st.sidebar.slider("Confidence Threshold", 
-                                           0.0, 1.0, 0.5, 0.1)
     
     if source_option == "Video File":
         video_file = st.sidebar.file_uploader("Upload Video", 
@@ -386,7 +401,7 @@ def main():
     if st.sidebar.button("Start Analysis"):
         with st.spinner("Processing video..."):
             analytics, performance_metrics, frame_number = process_video(
-                video_path, source_option, confidence_threshold
+                video_path, source_option
             )
             
             track_df, perf_df = create_visualizations(
