@@ -4,7 +4,7 @@ import streamlit as st
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
-from collections import defaultdict
+from collections import defaultdict, deque
 import numpy as np
 import pandas as pd
 from ultralytics import YOLO
@@ -13,7 +13,58 @@ import os
 from deep_sort_realtime.deepsort_tracker import DeepSort
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
+class PerformanceMonitor:
+    def __init__(self, window_size=50):
+        self.window_size = window_size
+        self.fps_data = deque(maxlen=window_size)
+        self.objects_data = deque(maxlen=window_size)
+        self.time_points = deque(maxlen=window_size)
+        
+        # Initialize the figure
+        self.fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=('FPS over Time', 'Objects Tracked over Time')
+        )
+        
+        # Add traces
+        self.fig.add_trace(
+            go.Scatter(x=[], y=[], mode='lines', name='FPS',
+                      line=dict(color='#2E86C1', width=2)),
+            row=1, col=1
+        )
+        
+        self.fig.add_trace(
+            go.Scatter(x=[], y=[], mode='lines', name='Objects',
+                      line=dict(color='#28B463', width=2)),
+            row=1, col=2
+        )
+        
+        # Update layout
+        self.fig.update_layout(
+            height=300,
+            showlegend=False,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        
+        self.fig.update_xaxes(title_text='Time', row=1, col=1)
+        self.fig.update_xaxes(title_text='Time', row=1, col=2)
+        self.fig.update_yaxes(title_text='FPS', row=1, col=1)
+        self.fig.update_yaxes(title_text='Objects', row=1, col=2)
+
+    def update(self, fps, num_objects):
+        current_time = time.time()
+        
+        self.fps_data.append(fps)
+        self.objects_data.append(num_objects)
+        self.time_points.append(current_time)
+        
+        # Update the figure data
+        self.fig.data[0].x = list(self.time_points)
+        self.fig.data[0].y = list(self.fps_data)
+        self.fig.data[1].x = list(self.time_points)
+        self.fig.data[1].y = list(self.objects_data)
 class ObjectAnalytics:
     def __init__(self):
         self.unique_objects = defaultdict(int)
@@ -127,11 +178,11 @@ def process_video(video_path, source_option, confidence_threshold=0.5):
     
     # Streamlit display elements
     frame_placeholder = st.empty()
-    metrics_placeholder = st.empty()  # Single placeholder for metrics
+    metrics_chart = st.empty()  # Placeholder for the charts
     progress_bar = st.progress(0)
     
-    # Initialize two columns within the metrics placeholder
-    metrics_col1, metrics_col2 = metrics_placeholder.columns(2)
+    # Initialize performance monitor
+    monitor = PerformanceMonitor()
     
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if source_option == "Video File" else None
     
@@ -220,8 +271,9 @@ def process_video(video_path, source_option, confidence_threshold=0.5):
         
         # Update performance metrics
         inference_time = time.time() - start_time
+        current_fps = 1.0 / inference_time if inference_time > 0 else 0
         performance_metrics['inference_time'].append(inference_time)
-        performance_metrics['fps'].append(1.0 / inference_time if inference_time > 0 else 0)
+        performance_metrics['fps'].append(current_fps)
         
         # Display frame
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -232,12 +284,9 @@ def process_video(video_path, source_option, confidence_threshold=0.5):
             progress = frame_number / total_frames
             progress_bar.progress(min(progress, 1.0))
         
-        # Update real-time metrics using placeholders
-        with st.expander("Real-Time Metrics"):
-            with metrics_col1:
-                st.metric("Current FPS", f"{performance_metrics['fps'][-1]:.2f}")
-            with metrics_col2:
-                st.metric("Objects Tracked", len(analytics.tracking_history))
+        # Update and display real-time metrics
+        monitor.update(current_fps, len(analytics.tracking_history))
+        metrics_chart.plotly_chart(monitor.fig, use_container_width=True)
 
     cap.release()
     return analytics, performance_metrics, frame_number
