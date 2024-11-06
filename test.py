@@ -150,10 +150,10 @@ class ObjectAnalytics:
         self.tracking_history.clear()
         self.frame_detections.clear()
 
-# Initialize models with caching
+# Cached models
 @st.cache_resource
 def load_models():
-    model = YOLO('yolov10n.pt')  # Ensure 'yolov5n.pt' is the correct model path
+    model = YOLO('yolov10n.pt') 
     tracker = DeepSort(
         max_age=30,
         n_init=3,
